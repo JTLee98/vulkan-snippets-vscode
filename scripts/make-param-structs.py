@@ -11,9 +11,9 @@ outf = open(outf_path, "a")
 outf.write("{")
 
 # try to parse vk.xml
-vk_xml_filename = "vk.xml"
+vk_xml_file = Path(__file__).parent / "vk.xml"
 try:
-  tree = ET.parse(vk_xml_filename)
+  tree = ET.parse(vk_xml_file)
 except Exception as e:
   print(f"vk.xml parse error : {e}")
   exit(1)
@@ -40,17 +40,20 @@ except Exception as e:
 # the following attributes in the <type> tags are relevant here:
 # - 'returnedonly'
 # - 'structextends'
-# - 'alias'
+# - 'deprecated'
 # the following attributes in the <member> tags are relevant here:
 # - 'optional'
+# - 'deprecated'
 
 # get all structs
 vkstructs = tree.getroot().find("types").findall("type[@category='struct']")
 # generate struct snippets
 for struct in vkstructs:
   # skip return only or deprecated structs
-  if struct.get("returnedonly", False) or struct.get("deprecated", False):
+  if struct.get("returnedonly") or struct.get("deprecated"):
     continue
+
+  # TODO: handle inherited structs ('structextends')
 
   # Create the VS Code snippet template
   # TODO: provide options for formatting brackets
@@ -59,30 +62,30 @@ for struct in vkstructs:
   # struct members
   idx = 1
   for member in struct.findall("member"):
-    # skip deprecated structs
+    # skip deprecated members
     if member.get("deprecated", False):
       continue
 
-    # get name and type
-    # TODO: get accurate type signature
+    # get name
     m_name = member.find("name").text
-    m_type = "value"
 
     # create snippet
     # TODO: provide more options for indentation
     member_snippet = f"\t.{m_name} = "
-    
     # sType: autocomplete value
     if (m_name == 'sType'):
-      member_snippet += member.get("values", "")
+      member_snippet += member.get("values", "") + ","
     # pNext: set to nullptr by default  
     elif (m_name == 'pNext'):
-      member_snippet += "nullptr"
+      member_snippet += "nullptr,"
     # other members
     else:
+      # add type specifier
+      # TODO: make this optional
+      m_type = "".join(member.itertext())
+      m_type = m_type[:m_type.find(m_name)]
       idx += 1
-      member_snippet += f"${{{idx}:/*{m_type}*/}}"
-    member_snippet += ','
+      member_snippet += f"${idx}, // {m_type.strip()}"
 
     # deal with optional members
     # TODO: provide more options for dealing with optional members in extension settings
@@ -93,8 +96,9 @@ for struct in vkstructs:
     # add comments
     # TODO: provide option to switch this off
     comment_tag = member.find("comment")
-    if comment_tag is ET.Element: 
-      member_snippet += " // " + comment_tag.text
+    if comment_tag != None: 
+      if comment_tag.text != None: 
+        member_snippet += " // " + comment_tag.text.strip()
     
     snippet_body.append(member_snippet)
   snippet_body.append("};")
@@ -106,7 +110,7 @@ for struct in vkstructs:
       "body": snippet_body
     }  
   }
-  outf.write(json.dumps(vkstruct_snippet,)[1:-1] + ",\n")
+  outf.write(json.dumps(vkstruct_snippet)[1:-1] + ",\n")
 
 # close json array
 outf.write("}")
@@ -114,3 +118,15 @@ outf.write("}")
 ### --- VULKAN COMMANDS--- ###
 
 # TODO: generate snippets with corresponding parameter structs from vulkan commands
+
+# vk.xml specifies vulkan commands with a <command> tag, which contains 
+# vulkan command format in vk.xml:
+# <command successcodes="VK_SUCCESS" errorcodes="VK_ERROR_OUT_OF_HOST_MEMORY,VK_ERROR_OUT_OF_DEVICE_MEMORY,VK_ERROR_INITIALIZATION_FAILED,VK_ERROR_LAYER_NOT_PRESENT,VK_ERROR_EXTENSION_NOT_PRESENT,VK_ERROR_INCOMPATIBLE_DRIVER">
+#     <proto><type>VkResult</type> <name>vkCreateInstance</name></proto>
+#     <param>const <type>VkInstanceCreateInfo</type>* <name>pCreateInfo</name></param>
+#     <param optional="true">const <type>VkAllocationCallbacks</type>* <name>pAllocator</name></param>
+#     <param><type>VkInstance</type>* <name>pInstance</name></param>
+# </command>
+
+# get all commands
+# vkcommands = tree.getroot().find("commands").findall("command")
